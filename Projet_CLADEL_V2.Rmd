@@ -1,0 +1,619 @@
+---
+title: "Projet_Meteo_CLADEL"
+author: "Florent Cladel"
+date: "21 juillet 2019"
+output:
+  html_document: 
+   self_contained: no
+---
+
+
+## Preparation de la session de travail
+
+###Installation packages & chargement des libraries
+
+```{r eval=FALSE}
+install.packages("funModeling")
+install.packages("tidyverse")
+install.packages("pastecs")
+install.packages("caret")
+install.packages("e1071")
+```
+
+```{r results="hide", warning=FALSE,message=FALSE}
+library(funModeling)
+library(dplyr)
+library(corrplot)
+library(caret)
+
+```
+
+
+### Préparation des fichiers train & test : controle de la donnée
+
+
+```{r include = FALSE}
+setwd(dir = "C:/Users/Florent/OneDrive/Documents/Etude/EM_dauphine/Modele lineaire generalise/Devoirmaison/em-glm-master/DM")
+meteo_train_raw<- read.csv('meteo.train.csv', header=T)
+meteo_test_raw<- read.csv('meteo.test.csv', header=T)
+```
+
+On va maintenant faire une rapide analyse de la donnée.
+
+```{r results="hide"}
+head(meteo_train_raw)
+```
+
+Toutes les variables semblent être des variables de type numérique à part la variable à expliquer. La sortie étant très longue pas la peine de polluer l'analyse.
+
+```{r}
+names(meteo_train_raw)
+```
+
+- **obs 1** : 31% des variables concernent des mesures liées au vent
+- **obs 2** : 25% des variables concernent des mesures liées aux nuages
+- **obs 3** : compte tenu de la nature des observations et de la variable à prédire (si il va pleuvoir demain), on peut se demander si les variables heures et minutes doivent être retenues.
+
+```{r}
+summary(meteo_train_raw)
+```
+
+On peut supprimer les variables minutes et heures qui n'apportent aucune information. 
+Sortie difficilement lisible car il y a beaucoup de variables.
+
+Afin de rendre le code, les graphiques et les résultats plus lisibles, on va renommer les variables et réagencer le dataframe afin de regrouper toutes les grandes familles de variables ensembles (vent, température, couverture nuageuse, pression etc..).
+
+
+```{r echo=FALSE}
+   meteo_train_2 <- select(meteo_train_raw,X,Year, Month, Day, RAIN_S=Total.Precipitation.daily.sum..sfc., 
+                  SNW_S=Snowfall.amount.raw.daily.sum..sfc.,
+                  SUN_DUR_M=Sunshine.Duration.daily.sum..sfc., 
+                  RAD_SUM=Shortwave.Radiation.daily.sum..sfc.,
+                  TEMP_M_2=Temperature.daily.mean..2.m.above.gnd.,
+                  TEMP_MAX_2=Temperature.daily.max..2.m.above.gnd.,
+                  TEMP_MIN_2=Temperature.daily.min..2.m.above.gnd.,
+                  HUM_M_2=Relative.Humidity.daily.mean..2.m.above.gnd.,
+                  HUM_MAX_2=Relative.Humidity.daily.max..2.m.above.gnd.,
+                  HUM_Min_2=Relative.Humidity.daily.min..2.m.above.gnd.,
+                  PRES_M=Mean.Sea.Level.Pressure.daily.mean..MSL., 
+                  PRES_MAX=Mean.Sea.Level.Pressure.daily.max..MSL., 
+                  PRES_MIN=Mean.Sea.Level.Pressure.daily.min..MSL.,
+                  TOT_CLOU_M=Total.Cloud.Cover.daily.mean..sfc., 
+                  TOT_CLOU_MAX=Total.Cloud.Cover.daily.max..sfc., 
+                  TOT_CLOU_MIN=Total.Cloud.Cover.daily.min..sfc.,
+                  HIGH_CLOU_M=High.Cloud.Cover.daily.mean..high.cld.lay.,
+                  HIGH_CLOU_MAX=High.Cloud.Cover.daily.max..high.cld.lay.,
+                  HIGH_CLOU_MIN=High.Cloud.Cover.daily.min..high.cld.lay.,
+                  MED_CLOU_M=Medium.Cloud.Cover.daily.mean..mid.cld.lay.,
+                  MED_CLOU_MAX=Medium.Cloud.Cover.daily.max..mid.cld.lay., 
+                  MED_CLOU_MIN=Medium.Cloud.Cover.daily.min..mid.cld.lay., 
+                  LOW_CLOU_M=Low.Cloud.Cover.daily.mean..low.cld.lay., 
+                  LOW_CLOU_MAX=Low.Cloud.Cover.daily.max..low.cld.lay., 
+                  LOW_CLOU_MIN=Low.Cloud.Cover.daily.min..low.cld.lay.,
+                  WIN_DIR_M_10=Wind.Direction.daily.mean..10.m.above.gnd.,
+                  WIN_DIR_M_80=Wind.Direction.daily.mean..80.m.above.gnd.,
+                  WIN_DIR_M_900=Wind.Direction.daily.mean..900.mb.,
+                  WIN_SPE_M_10=Wind.Speed.daily.mean..10.m.above.gnd.,
+                  WIN_SPE_MAX_10=Wind.Speed.daily.max..10.m.above.gnd.,
+                  WIN_SPE_MIN_10=Wind.Speed.daily.min..10.m.above.gnd.,
+                  WIN_SPE_M_80=Wind.Speed.daily.mean..80.m.above.gnd., 
+                  WIN_SPE_MAX_80=Wind.Speed.daily.max..80.m.above.gnd., 
+                  WIN_SPE_MIN_80=Wind.Speed.daily.min..80.m.above.gnd.,
+                  WIN_SPE_M_900=Wind.Speed.daily.mean..900.mb., 
+                  WIN_SPE_MAX_900=Wind.Speed.daily.max..900.mb., 
+                  WIN_SPE_MIN_900=Wind.Speed.daily.min..900.mb.,
+                  WIN_GUST_M=Wind.Gust.daily.mean..sfc.,
+                  WIN_GUST_MAX=Wind.Gust.daily.max..sfc.,
+                  WIN_GUST_MIN=Wind.Gust.daily.min..sfc.,
+                  pluie.demain)
+   meteo_test_2 <- select(meteo_test_raw,X,Year, Month, Day, RAIN_S=Total.Precipitation.daily.sum..sfc., 
+                  SNW_S=Snowfall.amount.raw.daily.sum..sfc.,
+                  SUN_DUR_M=Sunshine.Duration.daily.sum..sfc., 
+                  RAD_SUM=Shortwave.Radiation.daily.sum..sfc.,
+                  TEMP_M_2=Temperature.daily.mean..2.m.above.gnd.,
+                  TEMP_MAX_2=Temperature.daily.max..2.m.above.gnd.,
+                  TEMP_MIN_2=Temperature.daily.min..2.m.above.gnd.,
+                  HUM_M_2=Relative.Humidity.daily.mean..2.m.above.gnd.,
+                  HUM_MAX_2=Relative.Humidity.daily.max..2.m.above.gnd.,
+                  HUM_Min_2=Relative.Humidity.daily.min..2.m.above.gnd.,
+                  PRES_M=Mean.Sea.Level.Pressure.daily.mean..MSL., 
+                  PRES_MAX=Mean.Sea.Level.Pressure.daily.max..MSL., 
+                  PRES_MIN=Mean.Sea.Level.Pressure.daily.min..MSL.,
+                  TOT_CLOU_M=Total.Cloud.Cover.daily.mean..sfc., 
+                  TOT_CLOU_MAX=Total.Cloud.Cover.daily.max..sfc., 
+                  TOT_CLOU_MIN=Total.Cloud.Cover.daily.min..sfc.,
+                  HIGH_CLOU_M=High.Cloud.Cover.daily.mean..high.cld.lay.,
+                  HIGH_CLOU_MAX=High.Cloud.Cover.daily.max..high.cld.lay.,
+                  HIGH_CLOU_MIN=High.Cloud.Cover.daily.min..high.cld.lay.,
+                  MED_CLOU_M=Medium.Cloud.Cover.daily.mean..mid.cld.lay.,
+                  MED_CLOU_MAX=Medium.Cloud.Cover.daily.max..mid.cld.lay., 
+                  MED_CLOU_MIN=Medium.Cloud.Cover.daily.min..mid.cld.lay., 
+                  LOW_CLOU_M=Low.Cloud.Cover.daily.mean..low.cld.lay., 
+                  LOW_CLOU_MAX=Low.Cloud.Cover.daily.max..low.cld.lay., 
+                  LOW_CLOU_MIN=Low.Cloud.Cover.daily.min..low.cld.lay.,
+                  WIN_DIR_M_10=Wind.Direction.daily.mean..10.m.above.gnd.,
+                  WIN_DIR_M_80=Wind.Direction.daily.mean..80.m.above.gnd.,
+                  WIN_DIR_M_900=Wind.Direction.daily.mean..900.mb.,
+                  WIN_SPE_M_10=Wind.Speed.daily.mean..10.m.above.gnd.,
+                  WIN_SPE_MAX_10=Wind.Speed.daily.max..10.m.above.gnd.,
+                  WIN_SPE_MIN_10=Wind.Speed.daily.min..10.m.above.gnd.,
+                  WIN_SPE_M_80=Wind.Speed.daily.mean..80.m.above.gnd., 
+                  WIN_SPE_MAX_80=Wind.Speed.daily.max..80.m.above.gnd., 
+                  WIN_SPE_MIN_80=Wind.Speed.daily.min..80.m.above.gnd.,
+                  WIN_SPE_M_900=Wind.Speed.daily.mean..900.mb., 
+                  WIN_SPE_MAX_900=Wind.Speed.daily.max..900.mb., 
+                  WIN_SPE_MIN_900=Wind.Speed.daily.min..900.mb.,
+                  WIN_GUST_M=Wind.Gust.daily.mean..sfc.,
+                  WIN_GUST_MAX=Wind.Gust.daily.max..sfc.,
+                  WIN_GUST_MIN=Wind.Gust.daily.min..sfc.)
+  
+```
+
+#####**Nouveaux noms** :
+* **RAIN_S** = Total.Precipitation.daily.sum..sfc. 
+* **SNW_S** = Snowfall.amount.raw.daily.sum..sfc.
+* **SUN_DUR_M** = Sunshine.Duration.daily.sum..sfc. 
+- **RAD_SUM** = Shortwave.Radiation.daily.sum..sfc.
+- **TEMP_M_2** = Temperature.daily.mean..2.m.above.gnd.
+- **TEMP_MAX_2** = Temperature.daily.max..2.m.above.gnd.
+- **TEMP_MIN_2** = Temperature.daily.min..2.m.above.gnd.
+- **HUM_M_2** = Relative.Humidity.daily.mean..2.m.above.gnd.
+- **HUM_MAX_2** = Relative.Humidity.daily.max..2.m.above.gnd.
+- **HUM_Min_2** = Relative.Humidity.daily.min..2.m.above.gnd.
+- **PRES_M** = Mean.Sea.Level.Pressure.daily.mean..MSL. 
+- **PRES_MAX** = Mean.Sea.Level.Pressure.daily.max..MSL.
+- **PRES_MIN** = Mean.Sea.Level.Pressure.daily.min..MSL.
+- **TOT_CLOU_M** = Total.Cloud.Cover.daily.mean..sfc.
+- **TOT_CLOU_MAX** = Total.Cloud.Cover.daily.max..sfc.
+- **TOT_CLOU_MIN** = Total.Cloud.Cover.daily.min..sfc.
+- **HIGH_CLOU_M** = High.Cloud.Cover.daily.mean..high.cld.lay.
+- **HIGH_CLOU_MAX** = High.Cloud.Cover.daily.max..high.cld.lay.
+- **HIGH_CLOU_MIN** = High.Cloud.Cover.daily.min..high.cld.lay.
+- **MED_CLOU_M** = Medium.Cloud.Cover.daily.mean..mid.cld.lay.
+- **MED_CLOU_MAX** = Medium.Cloud.Cover.daily.max..mid.cld.lay. 
+- **MED_CLOU_MIN** = Medium.Cloud.Cover.daily.min..mid.cld.lay. 
+- **LOW_CLOU_M** = Low.Cloud.Cover.daily.mean..low.cld.lay.
+- **LOW_CLOU_MAX** = Low.Cloud.Cover.daily.max..low.cld.lay. 
+- **LOW_CLOU_MIN** = Low.Cloud.Cover.daily.min..low.cld.lay.
+- **WIN_DIR_M_10** = Wind.Direction.daily.mean..10.m.above.gnd.
+- **WIN_DIR_M_80** = Wind.Direction.daily.mean..80.m.above.gnd.
+- **WIN_DIR_M_900** = Wind.Direction.daily.mean..900.mb.
+- **WIN_SPE_M_10** = Wind.Speed.daily.mean..10.m.above.gnd.
+- **WIN_SPE_MAX_10** = Wind.Speed.daily.max..10.m.above.gnd.
+- **WIN_SPE_MIN_10** = Wind.Speed.daily.min..10.m.above.gnd.
+- **WIN_SPE_M_80** = Wind.Speed.daily.mean..80.m.above.gnd. 
+- **WIN_SPE_MAX_80** = Wind.Speed.daily.max..80.m.above.gnd. 
+- **WIN_SPE_MIN_80** = Wind.Speed.daily.min..80.m.above.gnd.
+- **WIN_SPE_M_900** = Wind.Speed.daily.mean..900.mb.
+- **WIN_SPE_MAX_900** = Wind.Speed.daily.max..900.mb. 
+- **WIN_SPE_MIN_900** = Wind.Speed.daily.min..900.mb.
+- **WIN_GUST_M** = Wind.Gust.daily.mean..sfc.
+- **WIN_GUST_MAX** = Wind.Gust.daily.max..sfc.
+- **WIN_GUST_MIN** = Wind.Gust.daily.min..sfc.
+
+```{r}
+str(meteo_train_2)
+```
+
+ 
+Confirmation que je n'ai que des variables de type numériques (integer or numeric), sauf la variable à expliquer
+```{r}
+
+df_status(meteo_train_2)
+```
+ 
+On observe qu'il n'y a pas de données manquantes
+
+Conclusion : le jeu de donnée est propre on peut passer à l'analyse
+
+#Analyse 
+
+On va procéder en plusieurs étapes :
+1. Analyse univariéé
+2. Analyse multivariéé (corrélation)
+
+##Analyse univarié
+
+```{r results='hide'}
+describe(meteo_train_2)
+
+```
+```{r}
+df_status(meteo_train_2)
+```
+On cache la sortie describe.
+On observe que certaine variables ont plus de 90% de leur données égale à zéro notamment:
+* Snowfall.amount.raw.daily.sum..sfc..
+* High.Cloud.Cover.daily.min..high.cld.lay.
+* Medium.Cloud.Cover.daily.min..mid.cld.lay.
+* Low.Cloud.Cover.daily.min..low.cld.lay.
+
+
+
+```{r fig.height = 10, fig.width = 10}
+plot_num(meteo_train_2)
+```
+
+
+
+Au vue de tous les histogrammes, il semble y avoir très peu d'observations aberrantes et leur valeurs semblent être très proches du reste de la distribution
+
+On va zoomer sur certaine d'entre elle pour mieux les regarder, notamment à la vue des histogrammes. Je ne regarde aucune variable en % comme aucune ne dépasse les 100%:
+* Temperature.daily.mean..2.m.above.gnd.
+* Mean.Sea.Level.Pressure.daily.min..MSL.
+* Wind.Gust.daily.min..sfc.
+* Wind.Speed.daily.max..900.mb.
+
+
+#### Valeurs aberrantes
+
+
+
+```{r rfig.width = 10}
+
+ boxplot(meteo_train_2$TEMP_M_2, col = c("red"),main = "Boxplot température moyenne daily (2m)", ylab = "Quantiles")
+
+ hist(meteo_train_2$TEMP_M_2,col=c("red"), main=paste("histogramme température moyenne daily (2m)"))
+```
+
+Variation de température comprise entre -10°C et 30°C, climat de type tempéré pas de valeur aberrante.
+ 
+ 
+
+```{r fig.width = 10}
+ boxplot(meteo_train_2$PRES_MIN, col = c("blue"),main = "Boxplot Mean.Sea.Level.Pressure.daily.min..MSL.", ylab = "Quantiles")
+ hist(meteo_train_2$PRES_MIN,col=c("blue"), main=paste("Mean.Sea.Level.Pressure.daily.min..MSL."))
+```
+Distribution assez sérrée principalement comprise entre 1000 et 1030, 2 observation aberrantes sortent du boxplot mais leurs valeurs restent quand même très proche des valeurs du reste de la distribution. Il ne s'agit pas pour moi de valeur aberrante.
+
+
+```{r fig.width = 10}
+ boxplot(meteo_train_2$WIN_GUST_MIN , col = c("grey"),main = "Boxplot Wind gust min", ylab = "Quantiles")
+ hist(meteo_train_2$WIN_GUST_MIN,col=c("grey"), main=paste("Wind.Gust.daily.min..sfc."))
+```
+Les valeurs en queue de distribution sont certes un peu éloigné du reste de la distribution au vue du box plot mais reste dans une échelle de valeur qui reste très cohérente (de 0 à 50 km/h) 
+
+
+```{r fig.width = 10}
+ boxplot(meteo_train_2$WIN_SPE_MAX_900 , col = c("grey"),main = "Boxplot wind speed max 900", ylab = "Quantiles")
+ hist(meteo_train_2$WIN_SPE_MAX_900,col=c("grey"), main=paste("Wind.Speed.daily.max..900.mb."))
+```
+Pareil que pour la variable rafale de vent, on reste dans une échelle de valeur cohérente. Pas de valeur aberrante.
+
+
+**Conclusion, il n'y a donc pas de valeur aberrante dans le jeu de donnée.**
+
+ 
+## Analyse multivarié (corrélarion)
+ 
+```{r fig.height = 10, fig.width = 10}
+ meteo_train_2_corr <-cor(meteo_train_2)
+ corrplot(meteo_train_2_corr,method="circle",type="lower")
+```
+ 
+
+Concernant les corrélations, on observe sans surprise que les familles de variables sont très positivement corrélées entre elles (à l'exception d'une famille).
+
+Les variables liées au vent sont très corrélées entre elles.
+
+Si on regarde lla famille de la couverture nuageuse, on observe que les variables traitant d'une haute couverture nuageuse et celles traitant d'une basse couverture nuageuse ne sont pas corrélées ou très peu.
+
+On observe aussi que le temps d'ensoleillement est corrélé négativement à presque toutes les variables exceptées la température et la radiation.
+
+On observe une relation moins forte de correlation entre la pression et la couverture nuageuse à moyenne altitude.
+
+A noter que les moyennes sont en générales plus corrélées que le min et le max et que d'après le graphique le minimum est souvent moins corrélé que le maximum.
+
+On utilisera ce graphique au moment du choix des variables pour savoir si le modèle est correcte.
+
+
+## Choix de modèle par le critère AIC
+ 
+On a choisi d'utiliser le critère de l'AIC avec les trois méthodes stepwise, backward, forward. Evidemment, il s'agit ici d'un modèle logistique au vue de la variable à expliquer.
+
+#####**Modèle Forward**
+
+```{r results='markup'}
+step(glm(pluie.demain~1,data=meteo_train_2, family=binomial), pluie.demain~X+Year+ Month +Day+ RAIN_S+ SNW_S+SUN_DUR_M+ RAD_SUM+
+      TEMP_M_2+TEMP_MAX_2+TEMP_MIN_2+
+      HUM_M_2+HUM_MAX_2+HUM_Min_2+
+      PRES_M+ PRES_MAX+ PRES_MIN+
+      TOT_CLOU_M+ TOT_CLOU_MAX+ TOT_CLOU_MIN+
+      HIGH_CLOU_M+HIGH_CLOU_MAX+HIGH_CLOU_MIN+
+      MED_CLOU_M+MED_CLOU_MAX+ MED_CLOU_MIN+
+      LOW_CLOU_M+ LOW_CLOU_MAX+ LOW_CLOU_MIN+
+      WIN_SPE_M_10+ WIN_DIR_M_10+WIN_SPE_MAX_10+WIN_SPE_MIN_10+
+      WIN_SPE_M_80+ WIN_DIR_M_80+WIN_SPE_MAX_80+ WIN_SPE_MIN_80+
+      WIN_SPE_M_900+ WIN_DIR_M_900+WIN_SPE_MAX_900+WIN_SPE_MIN_900+
+      WIN_GUST_M+WIN_GUST_MAX+WIN_GUST_MIN,
+      data=meteo_train_2, direction="forward")
+```
+ 
+ 
+ Avec la méthode forward on trouve un modèle à 12 variables avec un AIC à 1424.
+ Les variables appartiennent aux familles pression (3), Wind (5), couverture nuageuse (3), température (2), neige (1).
+ 
+ **Noms Variables** : PRES_MIN + MED_CLOU_MAX + WIN_DIR_M_900 + HIGH_CLOU_M + PRES_MAX + SNW_S + PRES_M + WIN_SPE_MAX_900 + WIN_SPE_M_80 + WIN_SPE_MIN_10 + WIN_GUST_MAX + TOT_CLOU_MAX
+ 
+ 
+#####**Modèle Stepwise**
+```{r}
+ step(glm(pluie.demain~1,data=meteo_train_2, family=binomial), pluie.demain~X+Year+ Month +Day+ RAIN_S+ SNW_S+SUN_DUR_M+ RAD_SUM+
+        TEMP_M_2+TEMP_MAX_2+TEMP_MIN_2+
+        HUM_M_2+HUM_MAX_2+HUM_Min_2+
+        PRES_M+ PRES_MAX+ PRES_MIN+
+        TOT_CLOU_M+ TOT_CLOU_MAX+ TOT_CLOU_MIN+
+        HIGH_CLOU_M+HIGH_CLOU_MAX+HIGH_CLOU_MIN+
+        MED_CLOU_M+MED_CLOU_MAX+ MED_CLOU_MIN+
+        LOW_CLOU_M+ LOW_CLOU_MAX+ LOW_CLOU_MIN+
+        WIN_SPE_M_10+ WIN_DIR_M_10+WIN_SPE_MAX_10+WIN_SPE_MIN_10+
+        WIN_SPE_M_80+ WIN_DIR_M_80+WIN_SPE_MAX_80+ WIN_SPE_MIN_80+
+        WIN_SPE_M_900+ WIN_DIR_M_900+WIN_SPE_MAX_900+WIN_SPE_MIN_900+
+        WIN_GUST_M+WIN_GUST_MAX+WIN_GUST_MIN,
+      data=meteo_train_2, direction="both")
+```
+ 
+Avec la méthode stepwise on trouve un modèle à 10 variables  avec un AIC à 1423.
+Les variables appartiennent aux familles pression (2), Wind (4), couverture nuageuse (3) et neige (1).
+
+ **Noms Variables** : PRES_MIN + MED_CLOU_MAX + WIN_DIR_M_900 + HIGH_CLOU_M + PRES_MAX + SNW_S + WIN_SPE_M_80 + WIN_SPE_MIN_10 + WIN_GUST_MAX + TOT_CLOU_MAX
+
+ 
+##### **Modèle backward**
+```{r}
+step(glm(pluie.demain~X+Year+ Month +Day+ RAIN_S+ SNW_S+SUN_DUR_M+ RAD_SUM+
+            TEMP_M_2+TEMP_MAX_2+TEMP_MIN_2+
+            HUM_M_2+HUM_MAX_2+HUM_Min_2+
+            PRES_M+ PRES_MAX+ PRES_MIN+
+            TOT_CLOU_M+ TOT_CLOU_MAX+ TOT_CLOU_MIN+
+            HIGH_CLOU_M+HIGH_CLOU_MAX+HIGH_CLOU_MIN+
+            MED_CLOU_M+MED_CLOU_MAX+ MED_CLOU_MIN+
+            LOW_CLOU_M+ LOW_CLOU_MAX+ LOW_CLOU_MIN+
+            WIN_SPE_M_10+ WIN_DIR_M_10+WIN_SPE_MAX_10+WIN_SPE_MIN_10+
+            WIN_SPE_M_80+ WIN_DIR_M_80+WIN_SPE_MAX_80+ WIN_SPE_MIN_80+
+            WIN_SPE_M_900+ WIN_DIR_M_900+WIN_SPE_MAX_900+WIN_SPE_MIN_900+
+            WIN_GUST_M+WIN_GUST_MAX+WIN_GUST_MIN,data=meteo_train_2, family=binomial), pluie.demain~1,
+          data=meteo_train_2, direction="backward")    
+```
+ 
+Avec la méthode stepwise on trouve un modèle à 15 variables  avec un AIC à 1407.
+Les variables appartiennent aux familles pression (1), Wind (6), couverture nuageuse (5), température (2), neige (1).
+
+**Noms variables ** : SNW_S + TEMP_M_2 + TEMP_MIN_2 +PRES_MAX + TOT_CLOU_MIN + HIGH_CLOU_MAX + MED_CLOU_MAX + 
+    LOW_CLOU_M + LOW_CLOU_MIN + WIN_SPE_MIN_10 + WIN_SPE_M_80 + WIN_SPE_M_900 + WIN_DIR_M_900 + WIN_SPE_MIN_900 + WIN_GUST_MAX
+
+**En conclusion d'après les trois méthodes nous choisirions celle minimisant le plus l'AIC soit la méthode backward.**
+ 
+
+En regardant ce modèle : 
+ 
+```{r}
+ 
+
+Modele1= glm( formula = pluie.demain ~ SNW_S + TEMP_M_2 + TEMP_MIN_2 + PRES_MAX + TOT_CLOU_MIN + HIGH_CLOU_MAX + MED_CLOU_MAX + LOW_CLOU_M + LOW_CLOU_MIN + WIN_SPE_MIN_10 + WIN_SPE_M_80 + WIN_SPE_M_900 + WIN_DIR_M_900 + WIN_SPE_MIN_900 + WIN_GUST_MAX, data = meteo_train_2, family =binomial)
+
+summary(Modele1)
+ 
+```
+ 
+
+ 
+On observe un AIC de 1407 sur ce modèle à 15 variables. Cependant de nombreuses variables ne semblent pas significatives avec ce modèle.
+On observe aussi que des variables très corrélées entre elles (amenant la même information) sont présentes dans le modèle.
+Si on décidait de n'utiliser que ce critère, on pourrait donc déjà enlever une par une les variables non significatives et très corrélés aux autres.
+
+On va maintenant utiliser le critère BIC pour afiner le modèle car il est plus parcimonieux que le critère AIC (discrimination augmente plus il y a de variable).
+ 
+ 
+## Choix de modèle par le critère BIC
+                    
+Nous avons trouver un modèle à 15 variables avec la méthode backward sur le critère AIC.
+Nous allons utiliser le critère BIC pour selectionner le meilleur modèle avec les trois méthodes forward, backward, stepwise.
+On espère avoir un modèle plus réduit avec des variables non corrélées dedans.
+
+
+##### **Méthode backward (BIC)**
+```{r}
+m=length(meteo_train_2$pluie.demain)
+
+step(glm(pluie.demain~X+Year+ Month +Day+ RAIN_S+ SNW_S+SUN_DUR_M+ RAD_SUM+
+           TEMP_M_2+TEMP_MAX_2+TEMP_MIN_2+
+           HUM_M_2+HUM_MAX_2+HUM_Min_2+
+           PRES_M+ PRES_MAX+ PRES_MIN+
+           TOT_CLOU_M+ TOT_CLOU_MAX+ TOT_CLOU_MIN+
+           HIGH_CLOU_M+HIGH_CLOU_MAX+HIGH_CLOU_MIN+
+           MED_CLOU_M+MED_CLOU_MAX+ MED_CLOU_MIN+
+           LOW_CLOU_M+ LOW_CLOU_MAX+ LOW_CLOU_MIN+
+           WIN_SPE_M_10+ WIN_DIR_M_10+WIN_SPE_MAX_10+WIN_SPE_MIN_10+
+           WIN_SPE_M_80+ WIN_DIR_M_80+WIN_SPE_MAX_80+ WIN_SPE_MIN_80+
+           WIN_SPE_M_900+ WIN_DIR_M_900+WIN_SPE_MAX_900+WIN_SPE_MIN_900+
+           WIN_GUST_M+WIN_GUST_MAX+WIN_GUST_MIN,data=meteo_train_2, family=binomial), pluie.demain~1,
+     data=meteo_train_2, direction="backward", k=log(m)) 
+
+```
+
+Avec la méthode stepwise on trouve un modèle à 8 variables avec un BIC à 1421.
+Les variables appartiennent aux familles pression (1), Wind (2), couverture nuageuse (3), température (2).
+
+**Noms Variables** : TEMP_M_2 + TEMP_MIN_2 + PRES_MAX + TOT_CLOU_MIN + MED_CLOU_MAX + LOW_CLOU_MIN + WIN_DIR_M_900 + WIN_GUST_MAX
+
+
+
+##### **Méthode forward (BIC)**
+```{r}
+step(glm(pluie.demain~1,data=meteo_train_2 , family =binomial), pluie.demain~X+Year+ Month +Day+ RAIN_S+ SNW_S+SUN_DUR_M+ RAD_SUM+
+       TEMP_M_2+TEMP_MAX_2+TEMP_MIN_2+
+       HUM_M_2+HUM_MAX_2+HUM_Min_2+
+       PRES_M+ PRES_MAX+ PRES_MIN+
+       TOT_CLOU_M+ TOT_CLOU_MAX+ TOT_CLOU_MIN+
+       HIGH_CLOU_M+HIGH_CLOU_MAX+HIGH_CLOU_MIN+
+       MED_CLOU_M+MED_CLOU_MAX+ MED_CLOU_MIN+
+       LOW_CLOU_M+ LOW_CLOU_MAX+ LOW_CLOU_MIN+
+       WIN_SPE_M_10+ WIN_DIR_M_10+WIN_SPE_MAX_10+WIN_SPE_MIN_10+
+       WIN_SPE_M_80+ WIN_DIR_M_80+WIN_SPE_MAX_80+ WIN_SPE_MIN_80+
+       WIN_SPE_M_900+ WIN_DIR_M_900+WIN_SPE_MAX_900+WIN_SPE_MIN_900+
+       WIN_GUST_M+WIN_GUST_MAX+WIN_GUST_MIN,
+     data=meteo_train_2, direction="forward", k=log(m))
+```
+
+Avec la méthode stepwise on trouve un modèle à 4 variables avec un BIC à 1435.
+Les variables appartiennent aux familles pression (1), Wind (1), couverture nuageuse (2).
+
+**Noms variables** : PRES_MIN + MED_CLOU_MAX + WIN_DIR_M_900 + HIGH_CLOU_M
+    
+    
+    
+##### **Méthode stepwise (BIC)**    
+```{r}
+step(glm(pluie.demain~1,data=meteo_train_2,family=binomial), pluie.demain~X+Year+ Month +Day+ RAIN_S+ SNW_S+SUN_DUR_M+ RAD_SUM+
+       TEMP_M_2+TEMP_MAX_2+TEMP_MIN_2+
+       HUM_M_2+HUM_MAX_2+HUM_Min_2+
+       PRES_M+ PRES_MAX+ PRES_MIN+
+       TOT_CLOU_M+ TOT_CLOU_MAX+ TOT_CLOU_MIN+
+       HIGH_CLOU_M+HIGH_CLOU_MAX+HIGH_CLOU_MIN+
+       MED_CLOU_M+MED_CLOU_MAX+ MED_CLOU_MIN+
+       LOW_CLOU_M+ LOW_CLOU_MAX+ LOW_CLOU_MIN+
+       WIN_SPE_M_10+ WIN_DIR_M_10+WIN_SPE_MAX_10+WIN_SPE_MIN_10+
+       WIN_SPE_M_80+ WIN_DIR_M_80+WIN_SPE_MAX_80+ WIN_SPE_MIN_80+
+       WIN_SPE_M_900+ WIN_DIR_M_900+WIN_SPE_MAX_900+WIN_SPE_MIN_900+
+       WIN_GUST_M+WIN_GUST_MAX+WIN_GUST_MIN,
+     data=meteo_train_2, direction="both", k=log(m))
+```
+
+Avec la méthode stepwise on trouve un modèle à 4 variables avec un BIC à 1435.
+Les variables appartiennent aux familles pression (1), Wind (1), couverture nuageuse (1), tempÃ©rature (2).
+
+**Noms variables** : PRES_MIN + MED_CLOU_MAX + WIN_DIR_M_900 + HIGH_CLOU_M
+
+
+On voit bien ici que le critère BIC choisit des modèles avec moins de variables et est donc plus parcimonieux.
+
+
+**On choisit le modele trouvé avec la méthode backward avec un BIC de 1421.**
+
+```{r}
+Modele2 = glm(formula = pluie.demain ~ TEMP_M_2 + TEMP_MIN_2 + PRES_MAX + 
+               TOT_CLOU_MIN + MED_CLOU_MAX + LOW_CLOU_MIN + WIN_DIR_M_900 + 
+               WIN_GUST_MAX, data = meteo_train_2, family=binomial)
+
+summary(Modele2)
+
+```
+
+Dans mon modèle 2 à 8 variables, toutes sont significatives et avec des variances faibles. 
+La variance du modèle est d'ailleurs légérement plus haute que le modèle 1 (1403 vs 1375 alors qu'il y a plus de variables).
+
+On observe que le modèle 2 est un sous modèle du modèle 1.
+
+
+##  Backtest du modèle
+
+En utilisant les deux modèles retenues, on va prédire sur l'échantillon nous ayant servi à nous entrainer.
+Le but est de comparer le nombre de bonne réponse avec nos deux modèles.
+
+
+```{r}
+meteo_train_2<-mutate(meteo_train_2,PROB_PLUIE_DEM_MOD_1=predict(Modele1, newdata =meteo_train_2, type='response'), PLUIE_DEM_ANSWER_MOD_1= case_when(
+  PROB_PLUIE_DEM_MOD_1 > 0.5 ~TRUE ,
+  PROB_PLUIE_DEM_MOD_1 < 0.5 ~FALSE ))
+
+meteo_train_2<-mutate(meteo_train_2,PROB_PLUIE_DEM_MOD_2=predict(Modele2, newdata =meteo_train_2, type='response'), PLUIE_DEM_ANSWER_MOD_2= case_when(
+  PROB_PLUIE_DEM_MOD_2 > 0.5 ~TRUE ,
+  PROB_PLUIE_DEM_MOD_2 < 0.5 ~FALSE ))
+
+```
+  
+  
+```{r}
+confusionMatrix(as.factor(meteo_train_2$PLUIE_DEM_ANSWER_MOD_1), as.factor(meteo_train_2$pluie.demain))
+
+confusionMatrix(as.factor(meteo_train_2$PLUIE_DEM_ANSWER_MOD_2), as.factor(meteo_train_2$pluie.demain))
+
+
+```
+
+Le modèle 1 (14 variables) a un degré d'excactitude de 71.86% alors que le modèle 2 (8 variables) a un pourcentage de prédiction de 70.58%.
+
+On observe aussi qu'il y a moins d'erreur de type 1 sur le modèle 1 (198 vs 211) pour à peu près le même nombre d'erreur de type 2.
+
+Concernant les autres sorties de cette fonction, je ne suis pas en mesure de les interprétés corrrectement.
+
+
+
+Concernant le choix du modèle, je préfère choisir le modèle 2. Voici les raisons de mon choix :
+
+1) les variables du modèle 1 (15 variables) ne sont pas toutes significatives.
+2) les variances des deux modèles sont très proches.
+3) les variables supplémentaires du modèle 1 sont très corrélées aux autres variables
+4) l'augmentation du degré d'exactitude avec le modèle de +1.3% ne justifie pas l'ajout de 7 nouvelles variables non significatives
+5) les variables du modèle 2 sont peu corrélées entre elles à l'exception des deux variables de température
+
+
+Cependant il y a un problème d'interpretation dans les coefficients. En effet, les deux variables de température ont des coefficients en sens opposés alors que leur corrélation est très positive.
+
+Je vérifie donc le sens des coefficients par une regression simple :
+
+```{r}
+summary(glm( formula = pluie.demain ~ TEMP_M_2, data =meteo_train_2,family=binomial))
+summary(glm( formula = pluie.demain ~ TEMP_MIN_2, data =meteo_train_2,family=binomial))
+
+
+```
+
+On se rend compte que le coefficient des deux variables est positifs lorsque la variable est isolée et s'inverse lorsque les deux variables sont ensemble.
+Ce problème est surement dû à la corrélation.
+
+Du coup je vais regarder la significativé des variables du modèle 2 lorsque j'enlève une des deux variables de température
+
+```{r}
+summary(glm(formula = pluie.demain ~ TEMP_M_2+PRES_MAX + 
+                TOT_CLOU_MIN + MED_CLOU_MAX + LOW_CLOU_MIN + WIN_DIR_M_900 + 
+                WIN_GUST_MAX, data = meteo_train_2, family=binomial))
+        
+summary(glm(formula = pluie.demain ~ TEMP_MIN_2+PRES_MAX + 
+                TOT_CLOU_MIN + MED_CLOU_MAX + LOW_CLOU_MIN + WIN_DIR_M_900 + 
+                WIN_GUST_MAX, data = meteo_train_2, family=binomial))
+```
+
+Lorsque qu'une des deux variables température est absente l'autre perd sa significativité. 
+Peux-t'on enlever du coup les deux variables?
+
+```{r}
+Modele3 = glm(formula = pluie.demain ~ PRES_MAX + 
+                TOT_CLOU_MIN + MED_CLOU_MAX + LOW_CLOU_MIN + WIN_DIR_M_900 + 
+                WIN_GUST_MAX, data = meteo_train_2, family=binomial)
+
+meteo_train_2<-mutate(meteo_train_2,PROB_PLUIE_DEM_MOD_3=predict(Modele3, newdata =meteo_train_2, type='response'), PLUI_DEM_ANSWER_MOD_3= case_when(
+  PROB_PLUIE_DEM_MOD_3 > 0.5 ~TRUE ,
+  PROB_PLUIE_DEM_MOD_3 < 0.5 ~FALSE ))
+
+confusionMatrix(as.factor(meteo_train_2$PLUI_DEM_ANSWER_MOD_3), as.factor(meteo_train_2$pluie.demain))
+```
+
+Concernant le pourcentage de prédiction le fait d'enlever ces deux variables diminue le pourcentage de -0.16 points.
+
+```{r}
+summary(Modele2)
+summary (Modele3)
+```
+
+On observe que ces deux modèles ne présentent pas des écarts importants. A noter, le retrait des variables de température fait beaucoup baisser la significativité de la variable rafale max.
+Les variances sont quasiment similaires.
+
+On va donc choisir en fonction de l'AIC qui est de 1433 pour le modèle 3 et de 1421 pour le modèle 2
+
+
+**Conclusion : nous choississons définitivement le modèle 2.**
+
+
+
+## Prediction sur base de test
+
+```{r}
+meteo_test_2<-mutate(meteo_test_2,PROB_PLUIE_DEM_MOD_FINAL=predict(Modele2, newdata =meteo_test_2, type='response'), PLUI_DEM_ANSWER_FINAL= case_when(
+  PROB_PLUIE_DEM_MOD_FINAL > 0.5 ~TRUE ,
+  PROB_PLUIE_DEM_MOD_FINAL < 0.5 ~FALSE ))
+
+```
+
+
